@@ -1,0 +1,119 @@
+import streamlit as st
+
+PASSWORD = "giacomo"  
+
+def login():
+    st.title("Accesso riservato")
+    pwd = st.text_input("Password", type="password")
+    if pwd == PASSWORD:
+        st.session_state["auth"] = True
+    elif pwd:
+        st.error("Password errata")
+
+if "auth" not in st.session_state:
+    login()
+    st.stop()
+
+import streamlit as st
+
+# ==================================================
+# MODELLO GLICOGENO
+# ==================================================
+def stima_glicogeno(
+    massa_muscolare_kg,
+    vo2_max,
+    carboidrati_g_kg,
+    attivita_recente,
+    sesso,
+    base_glicogeno_dm=462.0,
+    fattore_dm_wm=0.23,
+    glicogeno_epatico_base=90.0
+):
+    # ------------------ GLICOGENO MUSCOLARE ------------------
+    glicogeno_mmol_dm = base_glicogeno_dm
+
+    # Disponibilità CHO (continua)
+    cho_factor = (carboidrati_g_kg - 3.0) / 3.0
+    cho_factor = min(max(cho_factor, 0.0), 1.0)
+    glicogeno_mmol_dm += cho_factor * 102.0
+
+    # Deplezione
+    if attivita_recente == "intensa_senza_recupero":
+        glicogeno_mmol_dm -= 200.0
+
+    # Effetto VO2max (plateau)
+    vo2_eff = min(vo2_max, 75.0)
+    glicogeno_mmol_dm += ((vo2_eff - 50.0) / 10.0) * 67.0
+
+    # Effetto sesso
+    if sesso == "femmina":
+        glicogeno_mmol_dm += 34.0
+
+    # Limiti fisiologici
+    glicogeno_mmol_dm = min(max(glicogeno_mmol_dm, 150.0), 900.0)
+
+    # Conversioni
+    glicogeno_mmol_wm = glicogeno_mmol_dm * fattore_dm_wm
+    glicogeno_muscolare_g = (
+        glicogeno_mmol_wm * massa_muscolare_kg * 0.18016
+    )
+
+    # ------------------ GLICOGENO EPATICO ------------------
+    glicogeno_epatico_g = glicogeno_epatico_base
+    glicogeno_epatico_g += cho_factor * 20.0
+
+    if attivita_recente == "intensa_senza_recupero":
+        glicogeno_epatico_g -= 30.0
+
+    if sesso == "femmina":
+        glicogeno_epatico_g += 5.0
+
+    glicogeno_epatico_g = min(max(glicogeno_epatico_g, 50.0), 120.0)
+
+    # ------------------ TOTALE ------------------
+    glicogeno_totale_g = glicogeno_muscolare_g + glicogeno_epatico_g
+
+    return {
+        "muscolare": round(glicogeno_muscolare_g, 1),
+        "epatico": round(glicogeno_epatico_g, 1),
+        "totale": round(glicogeno_totale_g, 1)
+    }
+
+
+# ==================================================
+# STREAMLIT APP
+# ==================================================
+st.set_page_config(page_title="Stima Glicogeno", layout="centered")
+
+st.title("🔋 Stima automatica del glicogeno")
+st.markdown("Modello fisiologico basato su VO₂max, CHO e stato di recupero")
+
+st.divider()
+
+# INPUT
+massa = st.number_input("Massa muscolare (kg)", 15.0, 45.0, 25.0, 0.5)
+vo2 = st.slider("VO₂max (mL/kg/min)", 30, 85, 60)
+cho = st.slider("Carboidrati assunti (g/kg)", 0.0, 10.0, 6.0, 0.1)
+att = st.selectbox("Attività recente", ["riposo", "intensa_senza_recupero"])
+sesso = st.selectbox("Sesso", ["maschio", "femmina"])
+
+st.divider()
+
+# CALCOLO AUTOMATICO
+if st.button("Calcola"):
+    r = stima_glicogeno(massa, vo2, cho, att, sesso)
+
+    st.subheader("📊 Risultati")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Muscolare (g)", r["muscolare"])
+    col2.metric("Epatico (g)", r["epatico"])
+    col3.metric("Totale (g)", r["totale"])
+
+    st.bar_chart({
+        "Glicogeno muscolare": r["muscolare"],
+        "Glicogeno epatico": r["epatico"]
+    })
+
+    if r["totale"] < 400:
+        st.warning("⚠️ Scorte di glicogeno potenzialmente basse")
